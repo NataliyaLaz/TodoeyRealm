@@ -8,8 +8,11 @@
 
 import UIKit
 import RealmSwift
+import ChameleonFramework
 
-class TodoListViewController: UITableViewController{
+class TodoListViewController: SwipeTableViewController {
+    
+    @IBOutlet weak var searchBar: UISearchBar!
     
     let realm = try! Realm()
     
@@ -25,17 +28,55 @@ class TodoListViewController: UITableViewController{
     override func viewDidLoad() {
         super.viewDidLoad()
         
-        print(FileManager.default.urls(for: .documentDirectory, in: .userDomainMask))
+        //print(FileManager.default.urls(for: .documentDirectory, in: .userDomainMask))
         
-        //        navigationController?.navigationBar.barTintColor = .systemBlue
-        let appearance = UINavigationBarAppearance()
-        appearance.configureWithTransparentBackground()
-        appearance.backgroundColor = UIColor.systemBlue
-        appearance.titleTextAttributes = [.foregroundColor: UIColor.white]
-        navigationItem.standardAppearance = appearance
-        navigationItem.scrollEdgeAppearance = appearance
+        tableView.separatorStyle = .none
         
         //searchBar.delegate = self
+    }
+    
+    override func viewWillAppear(_ animated: Bool) {
+        
+        if let colorHex = selectedCategory?.color {
+            /*
+             First we set the title to match the category. We know that it exist since we are inside our if let statement here:
+             */
+            guard let navBar = navigationController?.navigationBar else {fatalError("NavigationController does not exist.")}
+            
+            title = selectedCategory!.name
+            
+            /*
+             Set the colour to use here:
+             */
+            if let theColorWeAreUsing = UIColor(hexString: colorHex){
+                
+                /*
+                 Then let us set the background colour of the search bar as well:
+                 */
+                searchBar.barTintColor = theColorWeAreUsing
+                searchBar.searchTextField.backgroundColor = FlatWhite()
+                
+                /*
+                 THen we will set the colours. Using navigationController?.navigationBar.backgroundColor is not an option here because in iOS 13, the status bar at the very top does not change colour (strangely enough). After Googling this, I found a solution where they use UINavigationBarAppearance() instead.
+                 */
+                let navBarAppearance = UINavigationBarAppearance()
+                
+                navBarAppearance.configureWithOpaqueBackground()
+                
+                /*
+                 We use Chameleon's ContrastColorOf() function to set the colour of the text based on the colour we use. If it is dark, the text is light, and vice versa.
+                 */
+                let contrastColor = ContrastColorOf(theColorWeAreUsing, returnFlat: true)
+                
+                navBarAppearance.largeTitleTextAttributes = [NSAttributedString.Key.foregroundColor: contrastColor]
+                navBarAppearance.backgroundColor = theColorWeAreUsing
+                navBar.tintColor = contrastColor
+                navBar.standardAppearance = navBarAppearance
+                navBar.scrollEdgeAppearance = navBarAppearance
+                
+                self.navigationController?.navigationBar.setNeedsLayout()
+            }
+        }
         
     }
     
@@ -47,11 +88,19 @@ class TodoListViewController: UITableViewController{
     
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         
-        let cell = tableView.dequeueReusableCell(withIdentifier: "ToDoItemCell", for: indexPath)
+        let cell = super.tableView(tableView, cellForRowAt: indexPath)
         
         if let item = todoItems?[indexPath.row] {
             
             cell.textLabel?.text = item.title
+            
+            if let color = UIColor(hexString: selectedCategory!.color)?.darken(byPercentage: CGFloat(indexPath.row) / CGFloat(todoItems!.count)) {
+                cell.backgroundColor = color
+                
+                cell.textLabel?.textColor = ContrastColorOf(color, returnFlat: true)
+            }
+            
+            // cell.backgroundColor = UIColor(hexString: selectedCategory?.color ?? "#007AFF")?.darken(byPercentage: (CGFloat(indexPath.row) / CGFloat(todoItems!.count)) * 0.5)
             
             cell.accessoryType = item.done ? .checkmark : .none
             
@@ -71,14 +120,14 @@ class TodoListViewController: UITableViewController{
             do{
                 try realm.write{
                     item.done = !item.done
-//                    realm.delete(item)
+                    //                    realm.delete(item)
                 }
             } catch {
                 print("Error saving done status, \(error)")
             }
         }
         tableView.reloadData()
-
+        
         tableView.deselectRow(at: indexPath, animated: true)
     }
     
@@ -121,38 +170,44 @@ class TodoListViewController: UITableViewController{
     
     //MARK: - Data Manipulation Methods
     
-    //    func saveItems(){
-    //
-    //        do {
-    //            try context.save()
-    //        } catch {
-    //            print("Error saving context, \(error)")
-    //        }
-    //        self.tableView.reloadData()
-    //    }
-    //
+    
     func loadItems() {
-
-       todoItems = selectedCategory?.items.sorted(byKeyPath: "title", ascending: true)
-
+        
+        todoItems = selectedCategory?.items.sorted(byKeyPath: "title", ascending: true)
+        
         tableView.reloadData()
     }
     
+    //MARK: - Delete Data From Swipe
+    
+    override func updateModel(at indexpath: IndexPath) {
+        
+        if let itemForDeletion = todoItems?[indexpath.row]{
+            do{
+                try realm.write{
+                    realm.delete(itemForDeletion)
+                }
+            } catch {
+                print("Error deleting item, \(error)")
+            }
+        }
+    }
     
 }
+
 //MARK: - Search bar methods
 
 extension TodoListViewController: UISearchBarDelegate {
-
+    
     func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
         
         todoItems = todoItems?.filter("title CONTAINS[cd] %@", searchBar.text!).sorted(byKeyPath: "dateCreated", ascending: true)
         
         tableView.reloadData()
     }
-
+    
     func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
-
+        
         if searchBar.text?.count == 0 {
             loadItems()
             DispatchQueue.main.async {
